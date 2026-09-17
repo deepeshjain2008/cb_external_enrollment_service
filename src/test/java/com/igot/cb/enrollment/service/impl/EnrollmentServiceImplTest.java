@@ -8,6 +8,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -42,6 +43,7 @@ import com.igot.cb.producer.Producer;
 import com.igot.cb.transactional.cassandrautils.CassandraOperation;
 import com.igot.cb.util.CbServerProperties;
 import com.igot.cb.util.Constants;
+import com.igot.cb.util.PayloadValidation;
 import com.igot.cb.util.TransformUtility;
 import com.igot.cb.util.cache.CacheService;
 import com.igot.cb.util.dto.SBApiResponse;
@@ -69,6 +71,8 @@ class EnrollmentServiceImplTest {
     private TransformUtility transformUtility;
     @Mock
     private Producer producer;
+    @Mock
+    private PayloadValidation payloadValidation;
 
     @BeforeEach
     void setUp() {
@@ -103,6 +107,8 @@ class EnrollmentServiceImplTest {
         String token = "jwt.token";
 
         when(accessTokenValidator.verifyUserToken(token)).thenReturn("user123");
+        when(transformUtility.validateAndGetUserId(eq(token), any(SBApiResponse.class))).thenReturn("user123");
+        when(cbServerProperties.getCourseraPartnerCode()).thenReturn("coursera");
 
         Map<String, Object> userProfile = new HashMap<>();
         userProfile.put(Constants.ID, "user123");
@@ -396,6 +402,42 @@ class EnrollmentServiceImplTest {
 
         assertEquals(HttpStatus.OK, response.getResponseCode());
         verify(enrollmentService, times(5)).fetchDataByContentId(anyString());
+    }
+
+    @Test
+    @DisplayName("readByUserId: should skip records with missing updatedOn when limit is applied")
+    void readByUserId_withLimit_skipsRecordsWithMissingUpdatedOn() {
+        String token = "jwt.token";
+        String userId = "user1";
+        when(accessTokenValidator.verifyUserToken(token)).thenReturn(userId);
+
+        Map<String, Object> searchRequest = new HashMap<>();
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put(Constants.STATUS, "In-Progress");
+        requestBody.put(Constants.LIMIT, 5);
+        searchRequest.put(Constants.REQUEST, requestBody);
+
+        Map<String, Object> withUpdatedOn = new HashMap<>();
+        withUpdatedOn.put("courseid", "c1");
+        withUpdatedOn.put(Constants.STATUS, 0);
+        withUpdatedOn.put(Constants.UPDATED_ON, Instant.now());
+
+        Map<String, Object> missingUpdatedOn = new HashMap<>();
+        missingUpdatedOn.put("courseid", "c2");
+        missingUpdatedOn.put(Constants.STATUS, 0);
+
+        when(cassandraOperation.getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(withUpdatedOn, missingUpdatedOn));
+        when(cbServerProperties.getMaximumAllowedLimit()).thenReturn(10);
+
+        Map<String, Object> contentData = new HashMap<>();
+        contentData.put("content", new HashMap<>());
+        doReturn(contentData).when(enrollmentService).fetchDataByContentId(anyString());
+
+        SBApiResponse response = enrollmentService.readByUserId(searchRequest, token);
+
+        assertEquals(HttpStatus.OK, response.getResponseCode());
+        verify(enrollmentService, times(1)).fetchDataByContentId(anyString());
     }
 
     @Test
@@ -1268,5 +1310,615 @@ class EnrollmentServiceImplTest {
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getResponseCode());
         assertTrue(response.getParams().getMsg()
                 .contains("Error while fetching user enrolment by externalId."));
+    }
+
+    @Test
+    @DisplayName("userProgressUpdate: should validate additional properties when present")
+    void userProgressUpdate_withAdditionalProperties_callsValidation() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode jsonNode = realMapper.createObjectNode();
+        jsonNode.put("completion_date", "2023-12-01 12:12:12");
+        jsonNode.set("additionalProperties", realMapper.createObjectNode().put("key", "value"));
+        String partnerCode = "partner";
+
+        when(cbServerProperties.getUserProgressSendFromPartner()).thenReturn("topic");
+        doNothing().when(producer).push(eq("topic"), any(JsonNode.class));
+
+        SBApiResponse response = enrollmentService.userProgressUpdate(jsonNode, partnerCode);
+
+        assertEquals("Progress report sent successfully", ((Map) response.getResult()).get("response"));
+        verify(payloadValidation).validatePayload(eq(Constants.PAYLOAD_VALIDATION_FILE_CONTENT_PROVIDER), any(JsonNode.class));
+    }
+
+    @Test
+    @DisplayName("getUserAttributes: should populate profile status, professional and cadre details")
+    void getUserAttributes_withValidProfileDetails_populatesAllFields() throws JsonProcessingException {
+        String profileDetailsStr = "{\"professionalDetails\":[{\"designation\":\"Developer\",\"group\":\"Engineering\"}],"
+                + "\"cadreDetails\":{\"cadreName\":\"Cadre1\",\"civilServiceName\":\"Service\",\"cadreBatch\":\"2020\"},"
+                + "\"profileStatus\":\"ACTIVE\"}";
+        Map<String, Object> userProfile = new HashMap<>();
+        userProfile.put(Constants.ID, "user1");
+        userProfile.put(Constants.ROOT_ORG_ID_REQ, "org1");
+        userProfile.put(Constants.PROFILE_DETAILS, profileDetailsStr);
+
+        ObjectMapper realMapper = new ObjectMapper();
+        Map<String, Object> parsedProfileDetails = realMapper.readValue(profileDetailsStr, new TypeReference<Map<String, Object>>() {
+        });
+        when(objectMapper.readValue(eq(profileDetailsStr), any(TypeReference.class))).thenReturn(parsedProfileDetails);
+
+        Map<String, String> result = (Map<String, String>) ReflectionTestUtils.invokeMethod(
+                enrollmentService, "getUserAttributes", userProfile);
+
+        assertEquals("ACTIVE", result.get(Constants.PROFILE_STATUS.toLowerCase()));
+        assertEquals("Developer", result.get(Constants.DESIGNATION));
+        assertEquals("Engineering", result.get(Constants.GROUP));
+        assertEquals("Cadre1", result.get(Constants.CADRE));
+        assertEquals("Service", result.get(Constants.SERVICE));
+        assertEquals("2020", result.get(Constants.BATCH));
+    }
+
+    @Test
+    @DisplayName("getUserAttributes: should throw CustomException when parsing fails")
+    void getUserAttributes_exceptionDuringParsing_throwsCustomException() throws JsonProcessingException {
+        Map<String, Object> userProfile = new HashMap<>();
+        userProfile.put(Constants.ID, "user1");
+        userProfile.put(Constants.PROFILE_DETAILS, "bad-json");
+
+        when(objectMapper.readValue(eq("bad-json"), any(TypeReference.class)))
+                .thenThrow(new RuntimeException("parse fail"));
+
+        CustomException ex = assertThrows(CustomException.class, () -> ReflectionTestUtils.invokeMethod(
+                enrollmentService, "getUserAttributes", userProfile));
+
+        assertEquals(Constants.USER_NOT_FOUND, ex.getCode());
+        assertEquals(HttpStatus.NOT_FOUND, ex.getHttpStatusCode());
+    }
+
+    @Test
+    void populateProfessionalDetails_notAList_returnsEarly() {
+        Map<String, String> userAttributes = new HashMap<>();
+        Map<String, Object> profileDetails = new HashMap<>();
+        profileDetails.put(Constants.PROFESSIONAL_DETAILS, "notAList");
+
+        ReflectionTestUtils.invokeMethod(enrollmentService, "populateProfessionalDetails", userAttributes,
+                profileDetails);
+
+        assertTrue(userAttributes.isEmpty());
+    }
+
+    @Test
+    void populateProfessionalDetails_firstElementNotMap_returnsEarly() {
+        Map<String, String> userAttributes = new HashMap<>();
+        Map<String, Object> profileDetails = new HashMap<>();
+        profileDetails.put(Constants.PROFESSIONAL_DETAILS, List.of("notAMap"));
+
+        ReflectionTestUtils.invokeMethod(enrollmentService, "populateProfessionalDetails", userAttributes,
+                profileDetails);
+
+        assertTrue(userAttributes.isEmpty());
+    }
+
+    @Test
+    void populateProfessionalDetails_firstElementEmptyMap_returnsEarly() {
+        Map<String, String> userAttributes = new HashMap<>();
+        Map<String, Object> profileDetails = new HashMap<>();
+        profileDetails.put(Constants.PROFESSIONAL_DETAILS, List.of(new HashMap<>()));
+
+        ReflectionTestUtils.invokeMethod(enrollmentService, "populateProfessionalDetails", userAttributes,
+                profileDetails);
+
+        assertTrue(userAttributes.isEmpty());
+    }
+
+    @Test
+    void populateCadreDetails_emptyMap_returnsEarly() {
+        Map<String, String> userAttributes = new HashMap<>();
+        Map<String, Object> profileDetails = new HashMap<>();
+        profileDetails.put(Constants.CADRE_DETAILS, new HashMap<>());
+
+        ReflectionTestUtils.invokeMethod(enrollmentService, "populateCadreDetails", userAttributes, profileDetails);
+
+        assertTrue(userAttributes.isEmpty());
+    }
+
+    @Test
+    void isUserEnrolled_notEnrolled_returnsFalse() {
+        when(cassandraOperation.getRecordsByPropertiesWithoutFiltering(any(), any(), any(), isNull(), eq(1)))
+                .thenReturn(Collections.emptyList());
+
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isUserEnrolled", new SBApiResponse(), "user1", "course1");
+
+        assertFalse(result);
+    }
+
+    @Test
+    void isOverallLimitExceeded_notExceeded_returnsFalse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode providerResponse = realMapper.createObjectNode();
+        providerResponse.put(Constants.OVER_ALL_PROVIDER_LIMIT, 10);
+
+        when(cacheService.getCache(anyString(), anyInt())).thenReturn(null);
+        when(cassandraOperation.getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new HashMap<>(), new HashMap<>()));
+
+        SBApiResponse response = new SBApiResponse();
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isOverallLimitExceeded", "partner1", providerResponse, response);
+
+        assertFalse(result);
+        verify(cacheService).putCache(anyString(), anyInt(), eq(2));
+    }
+
+    @Test
+    void isOverallLimitExceeded_cacheHitAndExceeded_returnsTrue() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode providerResponse = realMapper.createObjectNode();
+        providerResponse.put(Constants.OVER_ALL_PROVIDER_LIMIT, 5);
+
+        when(cacheService.getCache(anyString(), anyInt())).thenReturn("5");
+        when(cbServerProperties.getPartnerOverallLimitMsg()).thenReturn("Overall limit reached");
+
+        SBApiResponse response = new SBApiResponse();
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isOverallLimitExceeded", "partner1", providerResponse, response);
+
+        assertTrue(result);
+        verify(cassandraOperation, never()).getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any());
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals("Overall limit reached", response.getParams().getMsg());
+    }
+
+    @Test
+    void isUserWiseLimitExceeded_notExceeded_returnsFalse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode providerResponse = realMapper.createObjectNode();
+        providerResponse.put(Constants.USER_WISE_LIMIT_ENABLED, true);
+        providerResponse.put(Constants.USER_WISE_LIMIT, 5);
+
+        when(cacheService.getCache(anyString(), anyInt())).thenReturn(null);
+        when(cassandraOperation.getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new HashMap<>(), new HashMap<>()));
+
+        SBApiResponse response = new SBApiResponse();
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isUserWiseLimitExceeded", "user1", "partner1", providerResponse, response);
+
+        assertFalse(result);
+    }
+
+    @Test
+    void isUserWiseLimitExceeded_exceeded_returnsTrue() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode providerResponse = realMapper.createObjectNode();
+        providerResponse.put(Constants.USER_WISE_LIMIT_ENABLED, true);
+        providerResponse.put(Constants.USER_WISE_LIMIT, 2);
+
+        when(cacheService.getCache(anyString(), anyInt())).thenReturn(null);
+        when(cassandraOperation.getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new HashMap<>(), new HashMap<>()));
+        when(cbServerProperties.getPartnerUserwiseLimitMsg()).thenReturn("User wise limit reached");
+
+        SBApiResponse response = new SBApiResponse();
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isUserWiseLimitExceeded", "user1", "partner1", providerResponse, response);
+
+        assertTrue(result);
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals("User wise limit reached", response.getParams().getMsg());
+    }
+
+    @Test
+    void isConcurrentLimitExceeded_notExceeded_returnsFalse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode providerResponse = realMapper.createObjectNode();
+        providerResponse.put(Constants.CONCURRENT_LIMIT_ENABLED, true);
+        providerResponse.put(Constants.CONCURRENT_LIMIT, 3);
+
+        Map<String, Object> activeRecord = new HashMap<>();
+        activeRecord.put(Constants.PARTNER_ID_REQ, "partner1");
+        activeRecord.put(Constants.STATUS, 0);
+
+        when(cacheService.getCache(anyString(), anyInt())).thenReturn(null);
+        when(cassandraOperation.getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(activeRecord));
+
+        SBApiResponse response = new SBApiResponse();
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isConcurrentLimitExceeded", "user1", "partner1", providerResponse, response);
+
+        assertFalse(result);
+    }
+
+    @Test
+    void isConcurrentLimitExceeded_exceeded_returnsTrue() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode providerResponse = realMapper.createObjectNode();
+        providerResponse.put(Constants.CONCURRENT_LIMIT_ENABLED, true);
+        providerResponse.put(Constants.CONCURRENT_LIMIT, 1);
+
+        Map<String, Object> activeRecord1 = new HashMap<>();
+        activeRecord1.put(Constants.PARTNER_ID_REQ, "partner1");
+        activeRecord1.put(Constants.STATUS, 0);
+        Map<String, Object> activeRecord2 = new HashMap<>();
+        activeRecord2.put(Constants.PARTNER_ID_REQ, "partner1");
+        activeRecord2.put(Constants.STATUS, 0);
+
+        when(cacheService.getCache(anyString(), anyInt())).thenReturn(null);
+        when(cassandraOperation.getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(activeRecord1, activeRecord2));
+        when(cbServerProperties.getPartnerConcurrentLimitMsg()).thenReturn("Concurrent limit reached");
+
+        SBApiResponse response = new SBApiResponse();
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isConcurrentLimitExceeded", "user1", "partner1", providerResponse, response);
+
+        assertTrue(result);
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals("Concurrent limit reached", response.getParams().getMsg());
+    }
+
+    @Test
+    void isKarmaInsufficient_zeroKarmaPoints_returnsFalse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode providerResponse = realMapper.createObjectNode();
+        providerResponse.put(Constants.KARMA_POINTS_ENABLED, true);
+        providerResponse.put(Constants.KARMA_POINTS, 0);
+
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isKarmaInsufficient", "user1", providerResponse, "token", new HashMap<>(),
+                new SBApiResponse());
+
+        assertFalse(result);
+    }
+
+    @Test
+    void isKarmaInsufficient_sufficientPoints_returnsFalse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode providerResponse = realMapper.createObjectNode();
+        providerResponse.put(Constants.KARMA_POINTS_ENABLED, true);
+        providerResponse.put(Constants.KARMA_POINTS, 100);
+
+        when(transformUtility.readUserKarmaPoints("user1", "token")).thenReturn(150L);
+
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isKarmaInsufficient", "user1", providerResponse, "token", new HashMap<>(),
+                new SBApiResponse());
+
+        assertFalse(result);
+    }
+
+    @Test
+    void isKarmaInsufficient_exemptGroup_returnsFalse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode providerResponse = realMapper.createObjectNode();
+        providerResponse.put(Constants.KARMA_POINTS_ENABLED, true);
+        providerResponse.put(Constants.KARMA_POINTS, 100);
+
+        Map<String, String> userAttributes = new HashMap<>();
+        userAttributes.put(Constants.GROUP, "vip");
+        when(cbServerProperties.getKarmaExemptGroups()).thenReturn(List.of("VIP", "Admin"));
+
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "isKarmaInsufficient", "user1", providerResponse, "token", userAttributes,
+                new SBApiResponse());
+
+        assertFalse(result);
+    }
+
+    @Test
+    void enrolValidation_partnerIdDerivedFromContent_Success() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode userCourseEnroll = realMapper.createObjectNode();
+        userCourseEnroll.put(Constants.COURSE_ID_RQST, "course1");
+        String token = "valid.token";
+
+        ObjectNode contentResponse = realMapper.createObjectNode();
+        ObjectNode contentPartner = realMapper.createObjectNode();
+        contentPartner.put(Constants.ID, "partnerX");
+        contentResponse.set(Constants.CONTENT_PARTNER, contentPartner);
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(contentResponse);
+        when(transformUtility.validateAndGetUserId(eq(token), any())).thenReturn("user1");
+        when(transformUtility.callContentPartnerReadApi("partnerX")).thenReturn(
+                realMapper.createObjectNode().set(Constants.DATA, realMapper.createObjectNode()));
+        when(transformUtility.readUserDetails("user1")).thenReturn(Map.of(Constants.ID, "user1"));
+        when(transformUtility.buildSuccessResponse(any(), anyString(), eq(HttpStatus.OK))).thenAnswer(i -> {
+            SBApiResponse r = i.getArgument(0);
+            r.setResponseCode(HttpStatus.OK);
+            return r;
+        });
+
+        SBApiResponse response = enrollmentService.enrolValidation(userCourseEnroll, token);
+        assertEquals(HttpStatus.OK, response.getResponseCode());
+    }
+
+    @Test
+    void enrolValidation_bothPartnerIdAndCourseIdBlank_returnsBadRequest() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode userCourseEnroll = realMapper.createObjectNode();
+        userCourseEnroll.put(Constants.COURSE_ID_RQST, "");
+
+        when(transformUtility.callCiosContentReadAPi("")).thenReturn(realMapper.createObjectNode());
+
+        SBApiResponse response = enrollmentService.enrolValidation(userCourseEnroll, "token");
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals("Both partnerId and CourseId cannot be empty", response.getParams().getMsg());
+    }
+
+    @Test
+    void enrolValidation_userIdBlank_returnsResponse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode userCourseEnroll = realMapper.createObjectNode();
+        userCourseEnroll.put(Constants.COURSE_ID_RQST, "course1");
+        userCourseEnroll.put(Constants.PARTNER_ID, "partner1");
+        String token = "invalid.token";
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(realMapper.createObjectNode());
+        when(transformUtility.validateAndGetUserId(eq(token), any(SBApiResponse.class)))
+                .thenAnswer(invocation -> {
+                    SBApiResponse resp = invocation.getArgument(1);
+                    resp.setResponseCode(HttpStatus.BAD_REQUEST);
+                    resp.getParams().setMsg(Constants.USER_ID_DOESNT_EXIST);
+                    return null;
+                });
+
+        SBApiResponse response = enrollmentService.enrolValidation(userCourseEnroll, token);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals(Constants.USER_ID_DOESNT_EXIST, response.getParams().getMsg());
+    }
+
+    @Test
+    void enrolValidation_limitsExceeded_returnsResponse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode userCourseEnroll = realMapper.createObjectNode();
+        userCourseEnroll.put(Constants.COURSE_ID_RQST, "course1");
+        userCourseEnroll.put(Constants.PARTNER_ID, "partner1");
+        String token = "valid.token";
+
+        ObjectNode providerData = realMapper.createObjectNode();
+        providerData.put(Constants.OVER_ALL_PROVIDER_LIMIT, 1);
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(realMapper.createObjectNode());
+        when(transformUtility.validateAndGetUserId(eq(token), any())).thenReturn("user1");
+        when(transformUtility.callContentPartnerReadApi("partner1")).thenReturn(
+                realMapper.createObjectNode().set(Constants.DATA, providerData));
+        when(transformUtility.readUserDetails("user1")).thenReturn(Map.of(Constants.ID, "user1"));
+        when(cassandraOperation.getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new HashMap<>()));
+        when(cbServerProperties.getPartnerOverallLimitMsg()).thenReturn("Overall limit reached");
+
+        SBApiResponse response = enrollmentService.enrolValidation(userCourseEnroll, token);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals("Overall limit reached", response.getParams().getMsg());
+    }
+
+    @Test
+    void enrolValidation_accessSettingsEnabledAndFails_returnsBadRequest() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode userCourseEnroll = realMapper.createObjectNode();
+        userCourseEnroll.put(Constants.COURSE_ID_RQST, "course1");
+        userCourseEnroll.put(Constants.PARTNER_ID, "partner1");
+        String token = "valid.token";
+
+        ObjectNode contentResponse = realMapper.createObjectNode();
+        contentResponse.put(Constants.ACCESS_SETTINGS_ENABLED, true);
+
+        UserGroupCriteria criteria = mock(UserGroupCriteria.class);
+        when(criteria.evaluate(any())).thenReturn(false);
+        UserGroup userGroup = new UserGroup();
+        userGroup.setUserGroupId("group1");
+        userGroup.setUserGroupCriteriaList(List.of(criteria));
+        AccessControl accessControl = new AccessControl();
+        accessControl.setUserGroups(List.of(userGroup));
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(contentResponse);
+        when(transformUtility.validateAndGetUserId(eq(token), any())).thenReturn("user1");
+        when(transformUtility.callContentPartnerReadApi("partner1")).thenReturn(
+                realMapper.createObjectNode().set(Constants.DATA, realMapper.createObjectNode()));
+        when(transformUtility.readUserDetails("user1")).thenReturn(Map.of(Constants.ID, "user1"));
+        when(transformUtility.readAccessSettings("course1")).thenReturn(accessControl);
+        when(cbServerProperties.getAccessSettingsErrorMessage()).thenReturn("Access denied");
+
+        SBApiResponse response = enrollmentService.enrolValidation(userCourseEnroll, token);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals("Access denied", response.getParams().getMsg());
+    }
+
+    @Test
+    void enrolValidation_exception_returnsInternalServerError() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode userCourseEnroll = realMapper.createObjectNode();
+        userCourseEnroll.put(Constants.COURSE_ID_RQST, "course1");
+        userCourseEnroll.put(Constants.PARTNER_ID, "partner1");
+        String token = "valid.token";
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(realMapper.createObjectNode());
+        when(transformUtility.validateAndGetUserId(eq(token), any())).thenReturn("user1");
+        when(transformUtility.callContentPartnerReadApi("partner1")).thenThrow(new RuntimeException("boom"));
+
+        SBApiResponse response = enrollmentService.enrolValidation(userCourseEnroll, token);
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getResponseCode());
+        assertTrue(response.getParams().getMsg().contains(Constants.ENROLLMENT_ERROR));
+    }
+
+    @Test
+    void validateRequest_partnerIdMissing_derivedFromContent_returnsTrue() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode request = realMapper.createObjectNode();
+        request.put(Constants.COURSE_ID_RQST, "course1");
+
+        ObjectNode contentResponse = realMapper.createObjectNode();
+        ObjectNode contentPartner = realMapper.createObjectNode();
+        contentPartner.put(Constants.ID, "derivedPartner");
+        contentResponse.set(Constants.CONTENT_PARTNER, contentPartner);
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(contentResponse);
+
+        SBApiResponse response = new SBApiResponse();
+        Boolean result = ReflectionTestUtils.invokeMethod(enrollmentService, "validateRequest", request, response);
+
+        assertTrue(result);
+        assertEquals("derivedPartner", request.get(Constants.PARTNER_ID).asText());
+    }
+
+    @Test
+    void validateRequest_partnerIdMissing_notFoundInContent_returnsFalse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode request = realMapper.createObjectNode();
+        request.put(Constants.COURSE_ID_RQST, "course1");
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(realMapper.createObjectNode());
+
+        SBApiResponse response = new SBApiResponse();
+        Boolean result = ReflectionTestUtils.invokeMethod(enrollmentService, "validateRequest", request, response);
+
+        assertFalse(result);
+        assertEquals("PartnerId not found for given CourseId", response.getParams().getMsg());
+    }
+
+    @Test
+    void processEnrolment_success_enrollsUser() throws JsonProcessingException {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode contentResponse = realMapper.createObjectNode();
+        contentResponse.put(Constants.ACCESS_SETTINGS_ENABLED, false);
+        ObjectNode providerResponse = realMapper.createObjectNode().set(Constants.DATA, realMapper.createObjectNode());
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(contentResponse);
+        when(transformUtility.callContentPartnerReadApi("partner1")).thenReturn(providerResponse);
+        when(transformUtility.readUserDetails("user1")).thenReturn(Collections.emptyMap());
+        when(cbServerProperties.getCourseraPartnerCode()).thenReturn("coursera");
+        when(cassandraOperation.insertRecord(any(), any(), any())).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+
+        SBApiResponse response = new SBApiResponse();
+        SBApiResponse result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "processEnrolment", response, "user1", "course1", "partner1", "token");
+
+        assertEquals(HttpStatus.OK, result.getResponseCode());
+        assertEquals("User enrolled successfully", ((Map) result.getResult()).get("message"));
+        verify(cassandraOperation, times(2)).insertRecord(any(), any(), any());
+    }
+
+    @Test
+    void processEnrolment_limitsExceeded_returnsResponse() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode contentResponse = realMapper.createObjectNode();
+        ObjectNode providerData = realMapper.createObjectNode();
+        providerData.put(Constants.OVER_ALL_PROVIDER_LIMIT, 1);
+        ObjectNode providerResponse = realMapper.createObjectNode().set(Constants.DATA, providerData);
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(contentResponse);
+        when(transformUtility.callContentPartnerReadApi("partner1")).thenReturn(providerResponse);
+        when(transformUtility.readUserDetails("user1")).thenReturn(Collections.emptyMap());
+        when(cassandraOperation.getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new HashMap<>()));
+        when(cbServerProperties.getPartnerOverallLimitMsg()).thenReturn("Overall limit reached");
+
+        SBApiResponse response = new SBApiResponse();
+        SBApiResponse result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "processEnrolment", response, "user1", "course1", "partner1", "token");
+
+        assertEquals(HttpStatus.BAD_REQUEST, result.getResponseCode());
+        assertEquals("Overall limit reached", result.getParams().getMsg());
+        verify(cassandraOperation, never()).insertRecord(any(), any(), any());
+    }
+
+    @Test
+    void processEnrolment_accessControlFails_returnsBadRequest() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode contentResponse = realMapper.createObjectNode();
+        contentResponse.put(Constants.ACCESS_SETTINGS_ENABLED, true);
+        ObjectNode providerResponse = realMapper.createObjectNode().set(Constants.DATA, realMapper.createObjectNode());
+
+        UserGroupCriteria criteria = mock(UserGroupCriteria.class);
+        when(criteria.evaluate(any())).thenReturn(false);
+        UserGroup userGroup = new UserGroup();
+        userGroup.setUserGroupId("group1");
+        userGroup.setUserGroupCriteriaList(List.of(criteria));
+        AccessControl accessControl = new AccessControl();
+        accessControl.setUserGroups(List.of(userGroup));
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(contentResponse);
+        when(transformUtility.callContentPartnerReadApi("partner1")).thenReturn(providerResponse);
+        when(transformUtility.readUserDetails("user1")).thenReturn(Collections.emptyMap());
+        when(transformUtility.readAccessSettings("course1")).thenReturn(accessControl);
+        when(cbServerProperties.getAccessSettingsErrorMessage()).thenReturn("Access denied");
+
+        SBApiResponse response = new SBApiResponse();
+        SBApiResponse result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "processEnrolment", response, "user1", "course1", "partner1", "token");
+
+        assertEquals(HttpStatus.BAD_REQUEST, result.getResponseCode());
+        assertEquals("Access denied", result.getParams().getMsg());
+        verify(cassandraOperation, never()).insertRecord(any(), any(), any());
+    }
+
+    @Test
+    void processEnrolment_courseraInviteSuccess_enrollsUser() throws JsonProcessingException {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode contentResponse = realMapper.createObjectNode();
+        contentResponse.put(Constants.ACCESS_SETTINGS_ENABLED, false);
+        ObjectNode providerData = realMapper.createObjectNode();
+        providerData.put(Constants.PARTNER_CODE, "Coursera");
+        ObjectNode providerResponse = realMapper.createObjectNode().set(Constants.DATA, providerData);
+        Map<String, Object> userProfile = Map.of(Constants.ID, "user1");
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(contentResponse);
+        when(transformUtility.callContentPartnerReadApi("partner1")).thenReturn(providerResponse);
+        when(transformUtility.readUserDetails("user1")).thenReturn(userProfile);
+        when(cbServerProperties.getCourseraPartnerCode()).thenReturn("coursera");
+        when(transformUtility.callCourseraInviteApi(eq(contentResponse), eq(userProfile))).thenReturn(true);
+        when(cassandraOperation.insertRecord(any(), any(), any())).thenReturn(null);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+
+        SBApiResponse response = new SBApiResponse();
+        SBApiResponse result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "processEnrolment", response, "user1", "course1", "partner1", "token");
+
+        assertEquals(HttpStatus.OK, result.getResponseCode());
+        verify(transformUtility).callCourseraInviteApi(eq(contentResponse), eq(userProfile));
+        verify(cassandraOperation, times(2)).insertRecord(any(), any(), any());
+    }
+
+    @Test
+    void processEnrolment_courseraInviteFailure_returnsBadRequest() {
+        ObjectMapper realMapper = new ObjectMapper();
+        ObjectNode contentResponse = realMapper.createObjectNode();
+        contentResponse.put(Constants.ACCESS_SETTINGS_ENABLED, false);
+        ObjectNode providerData = realMapper.createObjectNode();
+        providerData.put(Constants.PARTNER_CODE, "Coursera");
+        ObjectNode providerResponse = realMapper.createObjectNode().set(Constants.DATA, providerData);
+        Map<String, Object> userProfile = Map.of(Constants.ID, "user1");
+
+        when(transformUtility.callCiosContentReadAPi("course1")).thenReturn(contentResponse);
+        when(transformUtility.callContentPartnerReadApi("partner1")).thenReturn(providerResponse);
+        when(transformUtility.readUserDetails("user1")).thenReturn(userProfile);
+        when(cbServerProperties.getCourseraPartnerCode()).thenReturn("coursera");
+        when(transformUtility.callCourseraInviteApi(eq(contentResponse), eq(userProfile))).thenReturn(false);
+
+        SBApiResponse response = new SBApiResponse();
+        SBApiResponse result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "processEnrolment", response, "user1", "course1", "partner1", "token");
+
+        assertEquals(HttpStatus.BAD_REQUEST, result.getResponseCode());
+        assertEquals("User invitation failed on Coursera", result.getParams().getMsg());
+        verify(cassandraOperation, never()).insertRecord(any(), any(), any());
+    }
+
+    @Test
+    void processEnrolment_exception_returnsInternalServerError() {
+        when(transformUtility.callCiosContentReadAPi("course1")).thenThrow(new RuntimeException("boom"));
+
+        SBApiResponse response = new SBApiResponse();
+        SBApiResponse result = ReflectionTestUtils.invokeMethod(
+                enrollmentService, "processEnrolment", response, "user1", "course1", "partner1", "token");
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, result.getResponseCode());
+        assertTrue(result.getParams().getMsg().contains(Constants.ENROLLMENT_ERROR));
     }
 }

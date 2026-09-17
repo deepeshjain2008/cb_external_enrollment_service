@@ -12,30 +12,27 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class RestExceptionHandling {
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity handleException(Exception ex) {
+    public ResponseEntity<ErrorResponse> handleException(Exception ex) {
         log.debug("RestExceptionHandler::handleException::" + ex);
         HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
-        ErrorResponse errorResponse = null;
-        if (ex instanceof CustomException) {
-            CustomException CustomException = (CustomException) ex;
+        ErrorResponse errorResponse;
+        if (ex instanceof CustomException customException) {
             status = HttpStatus.BAD_REQUEST;
             // Check if the CustomException provides an HTTP status code
-            if (CustomException != null) {
-                try {
-                    status = CustomException.getHttpStatusCode();
-                } catch (IllegalArgumentException e) {
-                    log.warn("Invalid HTTP status code provided in CustomException: " + CustomException.getHttpStatusCode());
-                }
+            try {
+                status = customException.getHttpStatusCode();
+            } catch (IllegalArgumentException e) {
+                log.warn("Invalid HTTP status code provided in CustomException: " + customException.getHttpStatusCode());
             }
             errorResponse = ErrorResponse.builder()
-                    .code(CustomException.getCode())
-                    .message(CustomException.getMessage())
-                    .httpStatusCode(CustomException.getHttpStatusCode() != null
-                            ? CustomException.getHttpStatusCode().value()
+                    .code(customException.getCode())
+                    .message(customException.getMessage())
+                    .httpStatusCode(customException.getHttpStatusCode() != null
+                            ? customException.getHttpStatusCode().value()
                             : status.value())
                     .build();
-            if (StringUtils.isNotBlank(CustomException.getMessage())) {
-                log.error(CustomException.getMessage());
+            if (StringUtils.isNotBlank(customException.getMessage())) {
+                log.error(customException.getMessage());
             }
 
             return new ResponseEntity<>(errorResponse, status);

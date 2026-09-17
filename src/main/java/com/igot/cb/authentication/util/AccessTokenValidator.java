@@ -21,13 +21,17 @@ import java.util.Map;
 @Component
 public class AccessTokenValidator {
 
-    @Autowired
-    KeyManager keyManager;
+    private final KeyManager keyManager;
 
     private static Logger logger = LoggerFactory.getLogger(AccessTokenValidator.class.getName());
     private static final ObjectMapper mapper = new ObjectMapper();
     private static PropertiesCache cache = PropertiesCache.getInstance();
     private static final String REALM_URL = cache.getProperty(Constants.SSO_URL) + "realms/" + cache.getProperty(Constants.SSO_REALM);
+
+    @Autowired
+    public AccessTokenValidator(KeyManager keyManager) {
+        this.keyManager = keyManager;
+    }
 
 
     /**

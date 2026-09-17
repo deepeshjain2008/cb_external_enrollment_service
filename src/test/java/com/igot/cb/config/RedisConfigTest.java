@@ -26,7 +26,6 @@ class RedisConfigTest {
     void setUp() {
         ReflectionTestUtils.setField(redisConfig, "redisHost", "localhost");
         ReflectionTestUtils.setField(redisConfig, "redisPort", 6379);
-        ReflectionTestUtils.setField(redisConfig, "redisTimeout", 60000L);
     }
 
     @Test

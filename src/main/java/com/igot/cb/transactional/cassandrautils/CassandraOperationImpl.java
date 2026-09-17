@@ -14,17 +14,18 @@ import com.datastax.oss.driver.api.querybuilder.update.Assignment;
 import com.datastax.oss.driver.api.querybuilder.update.Update;
 import com.datastax.oss.driver.api.querybuilder.update.UpdateStart;
 import com.datastax.oss.driver.api.querybuilder.update.UpdateWithAssignments;
-import com.igot.cb.util.Constants;
 import com.igot.cb.util.ApiResponse;
-
-import java.util.*;
-import java.util.stream.Collectors;
-
+import com.igot.cb.util.Constants;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 
 /**
@@ -35,8 +36,11 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class CassandraOperationImpl implements CassandraOperation {
 
-    @Autowired
-    CassandraConnectionManager connectionManager;
+    private final CassandraConnectionManager connectionManager;
+
+    public CassandraOperationImpl(CassandraConnectionManager connectionManager) {
+        this.connectionManager = connectionManager;
+    }
 
     @Override
     public ApiResponse insertRecord(String keyspaceName, String tableName, Map<String, Object> request) {

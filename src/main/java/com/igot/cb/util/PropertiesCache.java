@@ -16,6 +16,7 @@ import java.util.Properties;
  * It loads properties from specified files and provides methods to access them.
  * Also handles environment variable overrides for properties.
  */
+@SuppressWarnings("java:S6548")
 public class PropertiesCache {
     // Logger for logging messages
     private final Logger logger = LogManager.getLogger(getClass());
@@ -40,6 +41,7 @@ public class PropertiesCache {
             try {
                 configProp.load(in);
             } catch (IOException e) {
+                logger.error("Error loading properties from file '{}': {}", file, e.getMessage());
             }
         }
     }

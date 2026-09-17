@@ -1,13 +1,12 @@
 package com.igot.cb.transactional.cassandrautils;
 
+import com.datastax.oss.driver.api.core.CqlSession;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-import com.datastax.oss.driver.api.core.CqlSession;
-
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.*;
 
 class CassandraConnectionManagerTest {
@@ -29,12 +28,4 @@ class CassandraConnectionManagerTest {
         assertNotNull(session);
         verify(cassandraConnectionManager, times(1)).getSession(keyspace);
     }
-
-    // @Test
-    // void testCloseConnection() {
-    //     // Updated to mock a valid close method
-    //     doNothing().when(cassandraConnectionManager).closeConnection();
-    //     cassandraConnectionManager.closeConnection();
-    //     verify(cassandraConnectionManager, times(1)).closeConnection();
-    // }
 }

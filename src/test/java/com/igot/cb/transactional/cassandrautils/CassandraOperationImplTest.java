@@ -26,10 +26,10 @@ import org.springframework.util.ReflectionUtils;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -60,7 +60,7 @@ class CassandraOperationImplTest {
 
     @BeforeEach
     void setUp() {
-        cassandraOperationImpl = new CassandraOperationImpl();
+        cassandraOperationImpl = new CassandraOperationImpl(connectionManager);
     }
 
     @Test
@@ -91,8 +91,6 @@ class CassandraOperationImplTest {
             // Assert
             assertEquals("success", response.get(Constants.RESPONSE));
             verify(mockSession).prepare(anyString());
-            //verify(mockPreparedStatement).bind((Object[]) any());
-            //verify(mockSession).execute(any(BoundStatement.class));
         }
     }
 
@@ -129,10 +127,10 @@ class CassandraOperationImplTest {
         when(connectionManager.getSession(anyString())).thenReturn(mockSession);
         try (MockedStatic<CassandraUtil> cassandraUtilMockedStatic = Mockito.mockStatic(CassandraUtil.class)) {
             List<Map<String, Object>> expectedResponse = new ArrayList<>();
-            Map<String, Object> record = new HashMap<>();
-            record.put("id", "123");
-            record.put("name", "Test");
-            expectedResponse.add(record);
+            Map<String, Object> customerRecord = new HashMap<>();
+            customerRecord.put("id", "123");
+            customerRecord.put("name", "Test");
+            expectedResponse.add(customerRecord);
 
             cassandraUtilMockedStatic.when(() -> CassandraUtil.createResponse(any(ResultSet.class)))
                     .thenReturn(expectedResponse);
@@ -158,10 +156,10 @@ class CassandraOperationImplTest {
         when(connectionManager.getSession(anyString())).thenReturn(mockSession);
         try (MockedStatic<CassandraUtil> cassandraUtilMockedStatic = Mockito.mockStatic(CassandraUtil.class)) {
             List<Map<String, Object>> expectedResponse = new ArrayList<>();
-            Map<String, Object> record = new HashMap<>();
-            record.put("id", "123");
-            record.put("name", "Test");
-            expectedResponse.add(record);
+            Map<String, Object> customerRecord = new HashMap<>();
+            customerRecord.put("id", "123");
+            customerRecord.put("name", "Test");
+            expectedResponse.add(customerRecord);
 
             cassandraUtilMockedStatic.when(() -> CassandraUtil.createResponse(any(ResultSet.class)))
                     .thenReturn(expectedResponse);
@@ -204,10 +202,10 @@ class CassandraOperationImplTest {
         when(connectionManager.getSession(anyString())).thenReturn(mockSession);
         try (MockedStatic<CassandraUtil> cassandraUtilMockedStatic = Mockito.mockStatic(CassandraUtil.class)) {
             List<Map<String, Object>> expectedResponse = new ArrayList<>();
-            Map<String, Object> record = new HashMap<>();
-            record.put("id", "123");
-            record.put("name", "Test");
-            expectedResponse.add(record);
+            Map<String, Object> customerRecord = new HashMap<>();
+            customerRecord.put("id", "123");
+            customerRecord.put("name", "Test");
+            expectedResponse.add(customerRecord);
 
             cassandraUtilMockedStatic.when(() -> CassandraUtil.createResponse(any(ResultSet.class)))
                     .thenReturn(expectedResponse);

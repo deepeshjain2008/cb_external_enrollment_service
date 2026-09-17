@@ -3,7 +3,6 @@ package com.igot.cb.util.cache;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.igot.cb.config.RedisConfig;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -15,14 +14,11 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class CacheService {
 
-  @Autowired
-  private RedisTemplate<String, String> redisTemplate;
+  private final RedisTemplate<String, String> redisTemplate;
 
-  @Autowired
-  private RedisConfig redisConfig;
+  private final RedisConfig redisConfig;
 
-  @Autowired
-  private ObjectMapper objectMapper;
+  private final ObjectMapper objectMapper;
 
   @Value("${spring.redis.cacheTtl}")
   private long cacheTtl;
@@ -31,6 +27,12 @@ public class CacheService {
   private int defaultDatabase;
 
   private final ConcurrentHashMap<Integer, RedisTemplate<String, String>> templateCache = new ConcurrentHashMap<>();
+
+  public CacheService(RedisTemplate<String, String> redisTemplate, RedisConfig redisConfig, ObjectMapper objectMapper) {
+    this.redisTemplate = redisTemplate;
+    this.redisConfig = redisConfig;
+    this.objectMapper = objectMapper;
+  }
 
   private RedisTemplate<String, String> getTemplate(int dbIndex) {
     if (dbIndex == defaultDatabase) {

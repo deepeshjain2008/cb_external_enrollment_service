@@ -167,6 +167,32 @@ class CassandraConnectionManagerImplTest {
     }
 
     @Test
+    void testCreateCassandraConnectionWithKeySpaces_ConsistencyLevelNotConfigured_defaultsToLocalOne() {
+        try (MockedStatic<PropertiesCache> propStatic = mockStatic(PropertiesCache.class);
+                MockedStatic<CqlSession> cqlStatic = mockStatic(CqlSession.class)) {
+            PropertiesCache cache = mock(PropertiesCache.class);
+            propStatic.when(PropertiesCache::getInstance).thenReturn(cache);
+            when(cache.getProperty(Constants.CASSANDRA_CONFIG_HOST)).thenReturn("localhost");
+            when(cache.getProperty(Constants.CORE_CONNECTIONS_PER_HOST_FOR_LOCAL)).thenReturn("4");
+            when(cache.getProperty(Constants.CORE_CONNECTIONS_PER_HOST_FOR_REMOTE)).thenReturn("2");
+            when(cache.getProperty(Constants.HEARTBEAT_INTERVAL)).thenReturn("60");
+            when(cache.readProperty(Constants.SUNBIRD_CASSANDRA_CONSISTENCY_LEVEL)).thenReturn(null);
+
+            CqlSession mockSession = mock(CqlSession.class);
+            CqlSessionBuilder mockBuilder = mock(CqlSessionBuilder.class);
+            cqlStatic.when(CqlSession::builder).thenReturn(mockBuilder);
+            when(mockBuilder.addContactPoints(any())).thenReturn(mockBuilder);
+            when(mockBuilder.withLocalDatacenter(anyString())).thenReturn(mockBuilder);
+            when(mockBuilder.withConfigLoader(any())).thenReturn(mockBuilder);
+            when(mockBuilder.build()).thenReturn(mockSession);
+            Metadata metadata = mock(Metadata.class);
+            when(mockSession.getMetadata()).thenReturn(metadata);
+
+            assertDoesNotThrow(CassandraConnectionManagerImpl::new);
+        }
+    }
+
+    @Test
     void testGetTableList_Success() {
         try (MockedStatic<CqlSession> mocked = mockStatic(CqlSession.class)) {
             CqlSession mockSession = mock(CqlSession.class);

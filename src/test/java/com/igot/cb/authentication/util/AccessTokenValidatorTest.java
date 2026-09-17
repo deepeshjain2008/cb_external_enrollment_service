@@ -4,25 +4,22 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.igot.cb.authentication.model.KeyData;
 import com.igot.cb.util.Constants;
 import com.igot.cb.util.PropertiesCache;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.api.BeforeEach;
 import org.keycloak.common.util.Time;
 import org.keycloak.crypto.KeyWrapper;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.io.IOException;
 import java.security.PublicKey;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -37,10 +34,8 @@ class AccessTokenValidatorTest {
     @Mock
     private PublicKey mockPublicKey;
 
-    @InjectMocks
     private AccessTokenValidator accessTokenValidator;
 
-    @Spy
     private AccessTokenValidator spyAccessTokenValidator;
 
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -51,6 +46,8 @@ class AccessTokenValidatorTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        accessTokenValidator = new AccessTokenValidator(keyManager);
+        spyAccessTokenValidator = spy(new AccessTokenValidator(keyManager));
         expiredToken = generateToken("expiredUserId", Time.currentTime() - 1000, "expectedIssuer");
         invalidSignatureToken = generateToken("invalidSignatureUserId", Time.currentTime() + 1000, "expectedIssuer");
         invalidIssuerToken = generateToken("invalidIssuerUserId", Time.currentTime() + 1000, "invalidIssuer");

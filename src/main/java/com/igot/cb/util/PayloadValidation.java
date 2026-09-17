@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.igot.cb.util.exceptions.CustomException;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
+import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
 import java.io.InputStream;
 import java.util.Set;
@@ -19,7 +20,7 @@ public class PayloadValidation {
   public void validatePayload(String fileName, JsonNode payload) {
     log.info("PayloadValidation::validatePayload:inside");
     try {
-      JsonSchemaFactory schemaFactory = JsonSchemaFactory.getInstance();
+      JsonSchemaFactory schemaFactory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V4);
       InputStream schemaStream = schemaFactory.getClass().getResourceAsStream(fileName);
       JsonSchema schema = schemaFactory.getSchema(schemaStream);
 

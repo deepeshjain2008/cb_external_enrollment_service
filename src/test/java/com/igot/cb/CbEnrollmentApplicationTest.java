@@ -38,7 +38,7 @@ class CbEnrollmentApplicationTest {
     private CbEnrollmentApplication application;
 
     @Test
-    public void testMain() {
+    void testMain() {
         // Testing the main method using MockedStatic
         try (MockedStatic<SpringApplication> mockedStatic = Mockito.mockStatic(SpringApplication.class)) {
             // Arrange and Act
@@ -52,7 +52,7 @@ class CbEnrollmentApplicationTest {
     }
 
     @Test
-    public void testRestTemplate() {
+    void testRestTemplate() {
         // Create actual RestTemplate
         RestTemplate restTemplate = application.restTemplate();
         
@@ -66,7 +66,7 @@ class CbEnrollmentApplicationTest {
     }
 
     @Test
-    public void testGetClientHttpRequestFactory_UsingReflection() throws Exception {
+    void testGetClientHttpRequestFactory_UsingReflection() throws Exception {
         // Access private method via reflection
         Method method = CbEnrollmentApplication.class.getDeclaredMethod("getClientHttpRequestFactory");
         method.setAccessible(true);
@@ -89,7 +89,7 @@ class CbEnrollmentApplicationTest {
     }
     
     @Test
-    public void testGetClientHttpRequestFactory_UsingSubclass() throws Exception{
+    void testGetClientHttpRequestFactory_UsingSubclass() throws Exception{
         
         Method method = CbEnrollmentApplication.class.getDeclaredMethod("getClientHttpRequestFactory");
         method.setAccessible(true);
@@ -101,7 +101,7 @@ class CbEnrollmentApplicationTest {
     }
     
     @Test
-    public void testGetClientHttpRequestFactory_ConfigValues() throws Exception {
+    void testGetClientHttpRequestFactory_ConfigValues() throws Exception {
         // Use reflection to access private method
         Method method = CbEnrollmentApplication.class.getDeclaredMethod("getClientHttpRequestFactory");
         method.setAccessible(true);
@@ -139,7 +139,7 @@ class CbEnrollmentApplicationTest {
     }
 
     @Test
-    public void testSpringAnnotations() {
+    void testSpringAnnotations() {
         // Test the presence of required annotations
         assertTrue(CbEnrollmentApplication.class.isAnnotationPresent(SpringBootApplication.class));
         assertTrue(CbEnrollmentApplication.class.isAnnotationPresent(ComponentScan.class));

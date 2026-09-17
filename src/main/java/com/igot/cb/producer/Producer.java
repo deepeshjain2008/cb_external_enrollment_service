@@ -2,7 +2,6 @@ package com.igot.cb.producer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -11,10 +10,13 @@ import org.springframework.web.server.ResponseStatusException;
 @Component
 @Slf4j
 public class Producer {
-    @Autowired
-    KafkaTemplate<String, String> kafkaTemplate;
-    @Autowired
-    private ObjectMapper objectMapper;
+    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ObjectMapper objectMapper;
+
+    public Producer(KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
+        this.kafkaTemplate = kafkaTemplate;
+        this.objectMapper = objectMapper;
+    }
 
     public void push(String topic, Object data) {
         try {

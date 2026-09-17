@@ -13,6 +13,7 @@ import org.apache.logging.log4j.Logger;
  * @author Mahesh RV
  * @author Ruksana
  */
+@SuppressWarnings("java:S6548")
 public class CassandraPropertyReader {
 
     private static final String FILE_NAME = "cassandratablecolumn.properties";

@@ -5,7 +5,6 @@ import com.igot.cb.config.RedisConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -25,7 +24,6 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class CacheServiceTest {
 
-    @InjectMocks
     private CacheService cacheService;
 
     @Mock
@@ -53,6 +51,7 @@ class CacheServiceTest {
 
     @BeforeEach
     void setUp() {
+        cacheService = new CacheService(redisTemplate, redisConfig, objectMapper);
         ReflectionTestUtils.setField(cacheService, "cacheTtl", 3600L);
         ReflectionTestUtils.setField(cacheService, "defaultDatabase", 0);
 
@@ -74,7 +73,7 @@ class CacheServiceTest {
 
         cacheService.putCache(key, 0, object);
 
-        verify(valueOperations).set(eq(key), eq(jsonString), eq(3600L), eq(TimeUnit.SECONDS));
+        verify(valueOperations).set(key, jsonString, 3600L, TimeUnit.SECONDS);
     }
 
     @Test
@@ -90,7 +89,7 @@ class CacheServiceTest {
 
         cacheService.putCache(key, 1, object);
 
-        verify(valueOperationsDb1).set(eq(key), eq(jsonString), eq(3600L), eq(TimeUnit.SECONDS));
+        verify(valueOperationsDb1).set(key, jsonString, 3600L, TimeUnit.SECONDS);
         assertEquals(1, templateCache.size());
         assertTrue(templateCache.containsKey(1));
     }
@@ -114,7 +113,7 @@ class CacheServiceTest {
 
         verify(redisConfig, times(1)).createConnectionFactory(1);
         verify(redisConfig, times(1)).createRedisTemplate(connectionFactory);
-        verify(valueOperationsDb1, times(2)).set(eq(key), eq(jsonString), eq(3600L), eq(TimeUnit.SECONDS));
+        verify(valueOperationsDb1, times(2)).set(key, jsonString, 3600L, TimeUnit.SECONDS);
     }
 
     @Test
@@ -362,8 +361,8 @@ class CacheServiceTest {
         // Save to database 1
         cacheService.putCache(key, 1, object);
 
-        verify(valueOperations).set(eq(key), eq(jsonString), eq(3600L), eq(TimeUnit.SECONDS));
-        verify(valueOperationsDb1).set(eq(key), eq(jsonString), eq(3600L), eq(TimeUnit.SECONDS));
+        verify(valueOperations).set(key, jsonString, 3600L, TimeUnit.SECONDS);
+        verify(valueOperationsDb1).set(key, jsonString, 3600L, TimeUnit.SECONDS);
         assertEquals(1, templateCache.size());
     }
 }

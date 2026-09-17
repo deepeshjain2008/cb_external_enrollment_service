@@ -19,7 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.WordUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
@@ -38,23 +37,27 @@ import org.springframework.core.io.*;
 public class KafkaConsumer {
     private ObjectMapper mapper = new ObjectMapper();
 
-    @Autowired
-    private CassandraOperation cassandraOperation;
+    private final CassandraOperation cassandraOperation;
+    private final Producer producer;
+    private final CbServerProperties cbServerProperties;
+    private final TransformUtility transformUtility;
+    private final ResourceLoader resourceLoader;
+    private final CacheService cacheService;
 
-    @Autowired
-    private Producer producer;
-
-    @Autowired
-    private CbServerProperties cbServerProperties;
-
-    @Autowired
-    TransformUtility transformUtility;
-
-    @Autowired
-    private ResourceLoader resourceLoader;
-
-    @Autowired
-    private CacheService cacheService;
+    public KafkaConsumer(
+            CassandraOperation cassandraOperation,
+            Producer producer,
+            CbServerProperties cbServerProperties,
+            TransformUtility transformUtility,
+            ResourceLoader resourceLoader,
+            CacheService cacheService) {
+        this.cassandraOperation = cassandraOperation;
+        this.producer = producer;
+        this.cbServerProperties = cbServerProperties;
+        this.transformUtility = transformUtility;
+        this.resourceLoader = resourceLoader;
+        this.cacheService = cacheService;
+    }
 
     @KafkaListener(topics = "${spring.kafka.cornell.topic.name}", groupId = "${spring.kafka.consumer.group.id}")
     public void enrollUpdateConsumer(ConsumerRecord<String, String> data) {
@@ -63,7 +66,7 @@ public class KafkaConsumer {
             ZoneId zoneId = ZoneId.of("UTC");
             Instant instant = LocalDateTime.now().atZone(zoneId).toInstant();
             Map<String, Object> userCourseEnrollMap = mapper.readValue(data.value(), HashMap.class);
-            if (userCourseEnrollMap.containsKey(Constants.USER_ID) && userCourseEnrollMap.get(Constants.USER_ID) instanceof String && userCourseEnrollMap.containsKey(Constants.COURSE_ID) && userCourseEnrollMap.get(Constants.COURSE_ID) instanceof String) {
+            if (userCourseEnrollMap.containsKey(Constants.USER_ID) && userCourseEnrollMap.get(Constants.USER_ID) instanceof String userIdValue && userCourseEnrollMap.containsKey(Constants.COURSE_ID) && userCourseEnrollMap.get(Constants.COURSE_ID) instanceof String) {
                 String courseId = "";
                 String partnerId = userCourseEnrollMap.get("partnerId").toString();
                 String extCourseId = userCourseEnrollMap.get("courseid").toString();
@@ -74,7 +77,7 @@ public class KafkaConsumer {
                     courseId = contentNode.get("contentId").asText();
                 }
                 log.debug("KafkaConsumer :: enrollUpdateConsumer ::courseId from cios api {} userid {}", courseId, userCourseEnrollMap.get(Constants.USER_ID));
-                String[] parts = ((String) userCourseEnrollMap.get(Constants.USER_ID)).split("@");
+                String[] parts = userIdValue.split("@");
                 userCourseEnrollMap.put(Constants.USER_ID, parts[0]);
                 Map<String, Object> propertyMap = new HashMap<>();
                 propertyMap.put(Constants.USER_ID, userCourseEnrollMap.get(Constants.USER_ID));
@@ -156,8 +159,8 @@ public class KafkaConsumer {
                 }
             }
             JsonNode partnerApiResponse = transformUtility.callContentPartnerReadApi(partnerId);
-            if (!partnerApiResponse.path("certificateTemplateUrl").isMissingNode() && !partnerApiResponse.path("certificateTemplateUrl").isNull()) {
-                String svgTemplate = partnerApiResponse.get("certificateTemplateUrl").asText();
+            if (!partnerApiResponse.path(Constants.CERTIFICATE_TEMPLATE_URL).isMissingNode() && !partnerApiResponse.path(Constants.CERTIFICATE_TEMPLATE_URL).isNull()) {
+                String svgTemplate = partnerApiResponse.get(Constants.CERTIFICATE_TEMPLATE_URL).asText();
                 Resource resource = resourceLoader.getResource("classpath:certificateTemplate.json");
                 InputStream inputStream = resource.getInputStream();
                 JsonNode jsonNode = mapper.readTree(inputStream);
@@ -178,7 +181,7 @@ public class KafkaConsumer {
             }
 
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new CustomException(Constants.ERROR, e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 

@@ -3,7 +3,9 @@ package com.igot.cb.util.dto;
 import org.springframework.http.HttpStatus;
 
 import java.sql.Timestamp;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 public class SBApiResponse {
 
@@ -14,8 +16,6 @@ public class SBApiResponse {
     private HttpStatus responseCode;
 
     private transient Map<String, Object> response = new HashMap<>();
-
-    private List<Object> objectList = new ArrayList<>();
 
     public SBApiResponse() {
         this.ver = "v1";

@@ -1,27 +1,14 @@
 package com.igot.cb.consumer;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.igot.cb.producer.Producer;
+import com.igot.cb.transactional.cassandrautils.CassandraOperation;
+import com.igot.cb.util.CbServerProperties;
+import com.igot.cb.util.Constants;
+import com.igot.cb.util.TransformUtility;
+import com.igot.cb.util.cache.CacheService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,15 +22,13 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.igot.cb.producer.Producer;
-import com.igot.cb.transactional.cassandrautils.CassandraOperation;
-import com.igot.cb.util.CbServerProperties;
-import com.igot.cb.util.Constants;
-import com.igot.cb.util.TransformUtility;
-import com.igot.cb.util.cache.CacheService;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.util.*;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class KafkaConsumerTest {
@@ -78,7 +63,6 @@ class KafkaConsumerTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(kafkaConsumer, "mapper", mapper);
-        ReflectionTestUtils.setField(kafkaConsumer, "cacheService", cacheService);
         lenient().when(cbServerProperties.getCertificateCharLength()).thenReturn(30);
         lenient().when(cbServerProperties.getCertificateTopic()).thenReturn("certTopic");
     }
@@ -92,7 +76,7 @@ class KafkaConsumerTest {
         payloadMap.put("partnerId", "partner123");
         payloadMap.put("completedon", "01/01/2023");
         String payload = mapper.writeValueAsString(payloadMap);
-        ConsumerRecord<String, String> record = new ConsumerRecord<>("topic", 0, 0L, "key", payload);
+        ConsumerRecord<String, String> consumerRecord = new ConsumerRecord<>("topic", 0, 0L, "key", payload);
 
         JsonNode contentNode = mapper.createObjectNode();
         ((ObjectNode) contentNode).put("contentId", "course123");
@@ -147,7 +131,7 @@ class KafkaConsumerTest {
                 any())).thenReturn(userList);
 
         // Act
-        kafkaConsumer.enrollUpdateConsumer(record);
+        kafkaConsumer.enrollUpdateConsumer(consumerRecord);
 
         // Assert
         verify(producer).push(eq("certTopic"), any(JsonNode.class));
@@ -160,13 +144,13 @@ class KafkaConsumerTest {
     }
 
     @Test
-    void enrollUpdateConsumer_NoUserIdOrCourseId() throws Exception {
+    void enrollUpdateConsumer_NoUserIdOrCourseId() {
         // Arrange
         String payload = "{\"someField\":\"value\"}";
-        ConsumerRecord<String, String> record = new ConsumerRecord<>("topic", 0, 0, "key", payload);
+        ConsumerRecord<String, String> consumerRecord = new ConsumerRecord<>("topic", 0, 0, "key", payload);
 
         // Act
-        kafkaConsumer.enrollUpdateConsumer(record);
+        kafkaConsumer.enrollUpdateConsumer(consumerRecord);
 
         // Assert - should not throw exception and log error
         verify(cassandraOperation, never()).getRecordsByPropertiesWithoutFiltering(any(), any(), any(), any(), any());
@@ -175,10 +159,10 @@ class KafkaConsumerTest {
     }
 
     @Test
-    void enrollUpdateConsumer_NoExistingRecord() throws Exception {
+    void enrollUpdateConsumer_NoExistingRecord() {
         // Arrange
         String payload = "{\"userId\":\"user123@domain.com\",\"courseid\":\"course123\",\"partnerId\":\"partner123\"}";
-        ConsumerRecord<String, String> record = new ConsumerRecord<>("topic", 0, 0, "key", payload);
+        ConsumerRecord<String, String> consumerRecord = new ConsumerRecord<>("topic", 0, 0, "key", payload);
 
         JsonNode contentNode = mapper.createObjectNode();
         ((ObjectNode) contentNode).put("contentId", "course123");
@@ -196,7 +180,7 @@ class KafkaConsumerTest {
                 eq(1))).thenReturn(Collections.emptyList());
 
         // Act
-        kafkaConsumer.enrollUpdateConsumer(record);
+        kafkaConsumer.enrollUpdateConsumer(consumerRecord);
 
         // Assert
         verify(cassandraOperation, never()).updateRecord(any(), any(), any(), any());
@@ -205,16 +189,16 @@ class KafkaConsumerTest {
     }
 
     @Test
-    void enrollUpdateConsumer_Exception() throws Exception {
+    void enrollUpdateConsumer_Exception() {
         // Arrange
         String payload = "{\"userId\":\"user123@domain.com\",\"courseid\":\"course123\",\"partnerId\":\"partner123\"}";
-        ConsumerRecord<String, String> record = new ConsumerRecord<>("topic", 0, 0, "key", payload);
+        ConsumerRecord<String, String> consumerRecord = new ConsumerRecord<>("topic", 0, 0, "key", payload);
 
         lenient().when(transformUtility.callCiosReadAPi(anyString(), anyString()))
                 .thenThrow(new RuntimeException("Test exception"));
 
         // Act
-        kafkaConsumer.enrollUpdateConsumer(record);
+        kafkaConsumer.enrollUpdateConsumer(consumerRecord);
 
         // Assert - should not throw exception and log error
         verify(cassandraOperation, never()).updateRecord(any(), any(), any(), any());
@@ -223,10 +207,10 @@ class KafkaConsumerTest {
     }
 
     @Test
-    void receiveProgressUpdateFromPartner_Success() throws Exception {
+    void receiveProgressUpdateFromPartner_Success() {
         // Arrange
         String payload = "{\"partnerCode\":\"partner123\",\"completion_date\":\"01/01/2023\"}";
-        ConsumerRecord<String, String> record = new ConsumerRecord<>("topic", 0, 0, "key", payload);
+        ConsumerRecord<String, String> consumerRecord = new ConsumerRecord<>("topic", 0, 0, "key", payload);
 
         JsonNode partnerResponse = mapper.createObjectNode();
         ((ObjectNode) partnerResponse).put("id", "partner123");
@@ -245,17 +229,17 @@ class KafkaConsumerTest {
         doNothing().when(producer).push(eq(updateTopic), any(JsonNode.class));
 
         // Act
-        kafkaConsumer.receiveProgressUpdateFromPartner(record);
+        kafkaConsumer.receiveProgressUpdateFromPartner(consumerRecord);
 
         // Assert
         verify(producer).push(eq(updateTopic), any(JsonNode.class));
     }
 
     @Test
-    void receiveProgressUpdateFromPartner_MissingTransformJson() throws Exception {
+    void receiveProgressUpdateFromPartner_MissingTransformJson() {
         // Arrange
         String payload = "{\"partnerCode\":\"partner123\"}";
-        ConsumerRecord<String, String> record = new ConsumerRecord<>("topic", 0, 0, "key", payload);
+        ConsumerRecord<String, String> consumerRecord = new ConsumerRecord<>("topic", 0, 0, "key", payload);
 
         JsonNode partnerResponse = mapper.createObjectNode();
         ((ObjectNode) partnerResponse).put("id", "partner123");
@@ -264,23 +248,23 @@ class KafkaConsumerTest {
         when(transformUtility.callContentPartnerReadByPartnerCodeApi(anyString())).thenReturn(partnerResponse);
 
         // Act
-        kafkaConsumer.receiveProgressUpdateFromPartner(record);
+        kafkaConsumer.receiveProgressUpdateFromPartner(consumerRecord);
 
         // Assert
         verify(producer, never()).push(any(), any(JsonNode.class));
     }
 
     @Test
-    void receiveProgressUpdateFromPartner_Exception() throws Exception {
+    void receiveProgressUpdateFromPartner_Exception() {
         // Arrange
         String payload = "{\"partnerCode\":\"partner123\"}";
-        ConsumerRecord<String, String> record = new ConsumerRecord<>("topic", 0, 0, "key", payload);
+        ConsumerRecord<String, String> consumerRecord = new ConsumerRecord<>("topic", 0, 0, "key", payload);
 
         when(transformUtility.callContentPartnerReadByPartnerCodeApi(anyString()))
                 .thenThrow(new RuntimeException("Test exception"));
 
         // Act
-        kafkaConsumer.receiveProgressUpdateFromPartner(record);
+        kafkaConsumer.receiveProgressUpdateFromPartner(consumerRecord);
 
         // Assert
         verify(producer, never()).push(any(), any(JsonNode.class));
@@ -329,8 +313,6 @@ class KafkaConsumerTest {
                 any())).thenReturn(userList);
 
         when(cbServerProperties.getCertificateTopic()).thenReturn("certTopic");
-        // when(cbServerProperties.getCertificateCharLength()).thenReturn(30);
-
         // Explicitly mock the producer.push method with the exact topic name
         doNothing().when(producer).push(eq("certTopic"), any(JsonNode.class));
 
@@ -343,7 +325,7 @@ class KafkaConsumerTest {
     }
 
     @Test
-    void testSendUpdatedRecordDataToKafkaToGenerateCertificate_NoCertificateTemplate() throws Exception {
+    void testSendUpdatedRecordDataToKafkaToGenerateCertificate_NoCertificateTemplate() {
         // Arrange
         Map<String, Object> userCourseEnrollMap = new HashMap<>();
         userCourseEnrollMap.put(Constants.USER_ID, "user123");
@@ -536,11 +518,11 @@ class KafkaConsumerTest {
         // Given: an invalid JSON message that will cause ObjectMapper to throw
         // JsonProcessingException
         String invalidJson = "{invalid json}";
-        ConsumerRecord<String, String> record = new ConsumerRecord<>("test-topic", 0, 0L, "key", invalidJson);
+        ConsumerRecord<String, String> consumerRecord = new ConsumerRecord<>("test-topic", 0, 0L, "key", invalidJson);
 
         // When & Then: exception should be caught and logged; no exception should be
         // thrown from the method
-        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> kafkaConsumer.enrollUpdateConsumer(record));
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> kafkaConsumer.enrollUpdateConsumer(consumerRecord));
     }
 
     @Test

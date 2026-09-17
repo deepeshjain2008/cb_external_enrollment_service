@@ -35,7 +35,7 @@ class ErrorResponseTest {
                 .message("Error")
                 .httpStatusCode(400)
                 .build();
-        assertNotEquals(error, "some string");
+        assertNotEquals("some string", error);
     }
 
     @Test

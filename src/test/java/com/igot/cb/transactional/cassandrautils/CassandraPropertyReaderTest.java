@@ -1,25 +1,14 @@
 package com.igot.cb.transactional.cassandrautils;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mockConstruction;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.Properties;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.MockedConstruction;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import com.igot.cb.transactional.exceptions.CassandraPropertyReaderException;
+import static org.junit.jupiter.api.Assertions.*;
 
 @ExtendWith(MockitoExtension.class)
 class CassandraPropertyReaderTest {
@@ -106,26 +95,4 @@ class CassandraPropertyReaderTest {
         // Note: We can't assert it's not empty because we don't know what's in the properties file
         // But the fact that getInstance() didn't throw an exception means loadProperties() worked
     }
-    
-    // // This test is a bit tricky because we need to simulate an IOException during properties loading
-    // // We'll use a different approach by testing the exception handling directly
-    // @Test
-    // void loadProperties_ExceptionHandling() throws Exception {
-    //     // Create a test instance with a mocked Properties object that throws an exception
-    //     try (MockedConstruction<Properties> mockedProperties = mockConstruction(
-    //             Properties.class,
-    //             (mock, context) -> {
-    //                 doThrow(new IOException("Test IO Exception"))
-    //                         .when(mock).load(any(InputStream.class));
-    //             })) {
-            
-    //         // Now try to create a new CassandraPropertyReader instance
-    //         // This should trigger the loadProperties method which will throw an exception
-    //         assertThrows(CassandraPropertyReaderException.class, () -> {
-    //             Constructor<CassandraPropertyReader> constructor = CassandraPropertyReader.class.getDeclaredConstructor();
-    //             constructor.setAccessible(true);
-    //             constructor.newInstance();
-    //         });
-    //     }
-    // }
 }

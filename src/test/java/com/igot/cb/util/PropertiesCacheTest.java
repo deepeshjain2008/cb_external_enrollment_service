@@ -1,12 +1,9 @@
 package com.igot.cb.util;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.platform.commons.util.StringUtils;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 
-import java.io.InputStream;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.*;
