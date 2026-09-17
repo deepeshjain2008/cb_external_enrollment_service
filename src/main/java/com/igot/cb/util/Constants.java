@@ -137,6 +137,7 @@ public class Constants {
     public static final String PAGE_SIZE = "pageSize";
     public static final String FILTER_CRITERIA_MAP = "filterCriteriaMap";
     public static final String REQUESTED_FIELDS = "requestedFields";
+    public static final String EMPTY_STRING = "";
 
     private Constants() {
     }

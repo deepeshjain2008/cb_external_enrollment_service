@@ -22,6 +22,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.igot.cb.util.Constants.EMPTY_STRING;
+
 /**
  * @author Mahesh RV
  */
@@ -30,6 +32,9 @@ public class KeyManager {
 
   private static final Logger logger = LoggerFactory.getLogger(KeyManager.class.getName());
   private static final PropertiesCache propertiesCache = PropertiesCache.getInstance();
+  private static final String PUBLIC_KEY_HEADER = "-+BEGIN PUBLIC KEY-+";
+  private static final String PUBLIC_KEY_FOOTER = "-+END PUBLIC KEY-+";
+  private static final String NEW_LINE_REGEX = "[\\r\\n]+";
 
   private static final Map<String, KeyData> keyMap = new HashMap<>();
 
@@ -72,9 +77,9 @@ public class KeyManager {
   public static PublicKey loadPublicKey(String key) throws Exception {
     String publicKey = new String(key.getBytes(), StandardCharsets.UTF_8);
     // Remove header and footer from the key string
-    publicKey = publicKey.replaceAll("(-+BEGIN PUBLIC KEY-+)", "");
-    publicKey = publicKey.replaceAll("(-+END PUBLIC KEY-+)", "");
-    publicKey = publicKey.replaceAll("[\\r\\n]+", "");
+    publicKey = publicKey.replaceAll(PUBLIC_KEY_HEADER, EMPTY_STRING);
+    publicKey = publicKey.replaceAll(PUBLIC_KEY_FOOTER, EMPTY_STRING);
+    publicKey = publicKey.replaceAll(NEW_LINE_REGEX, EMPTY_STRING);
     // Decode the key string from Base64
     byte[] keyBytes = Base64Util.decode(publicKey.getBytes("UTF-8"), Base64Util.DEFAULT);
     // Convert the key bytes to a PublicKey object
